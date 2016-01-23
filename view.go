@@ -498,3 +498,25 @@ func (v *View) Resize(deltaX, deltaY int) error {
 	v.y1 = newY
 	return nil
 }
+
+// SetSize just set new absolute size of a view.
+func (v *View) SetSize(x, y int) error {
+	v.x1 = x
+	v.y1 = y
+	return nil
+}
+
+// Reset buffer content.
+func (v *View) Reset() {
+	v.lines = nil
+	v.viewLines = nil
+	v.ox = 0
+	v.ox = 0
+	v.cx = 0
+	v.cy = 0
+}
+
+// LinesCount returns number of rows in the buffer of a view.
+func (v *View) LinesCount() int {
+	return len(v.lines)
+}
