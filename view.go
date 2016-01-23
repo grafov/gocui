@@ -486,3 +486,15 @@ func (v *View) Word(x, y int) (string, error) {
 func indexFunc(r rune) bool {
 	return r == ' ' || r == 0
 }
+
+// Resize a view. Negative values shrink a view.
+func (v *View) Resize(deltaX, deltaY int) error {
+	newX := v.x1 + deltaX
+	newY := v.y1 + deltaY
+	if newX <= 0 || newY <= 0 {
+		return errViewSizeTooSmall
+	}
+	v.x1 = newX
+	v.y1 = newY
+	return nil
+}
