@@ -11,13 +11,7 @@ import (
 	"github.com/nsf/termbox-go"
 )
 
-var (
-	// ErrQuit is used to decide if the MainLoop finished succesfully.
-	ErrQuit = errors.New("quit")
-
-	// ErrUnknownView allows to assert if a View must be initialized.
-	ErrUnknownView = errors.New("unknown view")
-)
+var ()
 
 // Gui represents the whole User Interface, including the views, layouts
 // and keybindings.

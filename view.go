@@ -492,7 +492,7 @@ func (v *View) Resize(deltaX, deltaY int) error {
 	newX := v.x1 + deltaX
 	newY := v.y1 + deltaY
 	if newX <= 0 || newY <= 0 {
-		return errViewSizeTooSmall
+		return ErrViewSizeTooSmall
 	}
 	v.x1 = newX
 	v.y1 = newY
