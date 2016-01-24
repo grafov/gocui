@@ -27,6 +27,7 @@ type View struct {
 	readCache      string
 
 	tainted   bool       // marks if the viewBuffer must be updated
+	visible   bool       // set panel visibility (by default it visible)
 	viewLines []viewLine // internal representation of the view's buffer
 
 	// BgColor and FgColor allow to configure the background and foreground
@@ -76,6 +77,7 @@ func newView(name string, x0, y0, x1, y1 int) *View {
 		y1:      y1,
 		Frame:   true,
 		tainted: true,
+		visible: true,
 	}
 	return v
 }
@@ -202,6 +204,9 @@ func (v *View) Rewind() {
 
 // draw re-draws the view's contents.
 func (v *View) draw() error {
+	if !v.visible {
+		return nil
+	}
 	maxX, maxY := v.Size()
 
 	if v.Wrap {
@@ -519,4 +524,21 @@ func (v *View) Reset() {
 // LinesCount returns number of rows in the buffer of a view.
 func (v *View) LinesCount() int {
 	return len(v.lines)
+}
+
+// Hide view.
+func (v *View) Hide() {
+	v.visible = false
+	return
+}
+
+// Unhide view.
+func (v *View) Unhide() {
+	v.visible = true
+	return
+}
+
+// Visible shows visibility of a view.
+func (v *View) Visible() bool {
+	return v.visible
 }

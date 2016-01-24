@@ -298,6 +298,9 @@ func (g *Gui) Flush() error {
 		return err
 	}
 	for _, v := range g.views {
+		if !v.visible {
+			continue
+		}
 		if v.Frame {
 			if err := g.drawFrame(v); err != nil {
 				return err
