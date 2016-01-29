@@ -6,25 +6,28 @@ package gocui
 
 import (
 	"errors"
-	"sync"
 
 	"github.com/nsf/termbox-go"
 )
 
-var ()
+// Handler represents a handler that can be used to update or modify the GUI.
+type Handler func(*Gui) error
+
+// userEvent represents an event triggered by the user.
+type userEvent struct {
+	h Handler
+}
 
 // Gui represents the whole User Interface, including the views, layouts
 // and keybindings.
 type Gui struct {
-	events      chan termbox.Event
+	tbEvents    chan termbox.Event
+	userEvents  chan userEvent
 	views       []*View
 	currentView *View
-	layout      func(*Gui) error
+	layout      Handler
 	keybindings []*keybinding
 	maxX, maxY  int
-
-	// Protects the gui from being flushed concurrently.
-	mu sync.Mutex
 
 	// BgColor and FgColor allow to configure the background and foreground
 	// colors of the GUI.
@@ -34,8 +37,8 @@ type Gui struct {
 	// foreground colors of the selected line, when it is highlighted.
 	SelBgColor, SelFgColor Attribute
 
-	// If ShowCursor is true then the cursor is enabled.
-	ShowCursor bool
+	// If Cursor is true then the cursor is enabled.
+	Cursor bool
 
 	// If Mouse is true then mouse events will be enabled.
 	Mouse bool
@@ -52,7 +55,8 @@ func (g *Gui) Init() error {
 	if err := termbox.Init(); err != nil {
 		return err
 	}
-	g.events = make(chan termbox.Event, 20)
+	g.tbEvents = make(chan termbox.Event, 20)
+	g.userEvents = make(chan userEvent, 20)
 	g.maxX, g.maxY = termbox.Size()
 	g.BgColor = ColorBlack
 	g.FgColor = ColorWhite
@@ -135,7 +139,7 @@ func (g *Gui) View(name string) (*View, error) {
 // error ErrUnknownView if a view in that position does not exist.
 func (g *Gui) ViewByPosition(x, y int) (*View, error) {
 	for _, v := range g.views {
-		if x >= v.x0 && x <= v.x1 && y >= v.y0 && y <= v.y1 {
+		if x > v.x0 && x < v.x1 && y > v.y0 && y < v.y1 {
 			return v, nil
 		}
 	}
@@ -199,14 +203,22 @@ func (g *Gui) SetKeybinding(viewname string, key interface{}, mod Modifier, h Ke
 	return nil
 }
 
+// Execute executes the given handler. This function can be called safely from
+// a goroutine in order to update the GUI. It is important to note that it
+// won't be executed immediately, instead it will be added to the user events
+// queue.
+func (g *Gui) Execute(h Handler) {
+	go func() { g.userEvents <- userEvent{h: h} }()
+}
+
 // SetLayout sets the current layout. A layout is a function that
 // will be called everytime the gui is re-drawed, it must contain
 // the base views and its initializations.
-func (g *Gui) SetLayout(layout func(*Gui) error) {
+func (g *Gui) SetLayout(layout Handler) {
 	g.layout = layout
 	g.currentView = nil
 	g.views = nil
-	go func() { g.events <- termbox.Event{Type: termbox.EventResize} }()
+	go func() { g.tbEvents <- termbox.Event{Type: termbox.EventResize} }()
 }
 
 // MainLoop runs the main loop until an error is returned. A successful
@@ -214,7 +226,7 @@ func (g *Gui) SetLayout(layout func(*Gui) error) {
 func (g *Gui) MainLoop() error {
 	go func() {
 		for {
-			g.events <- termbox.PollEvent()
+			g.tbEvents <- termbox.PollEvent()
 		}
 	}()
 
@@ -224,18 +236,24 @@ func (g *Gui) MainLoop() error {
 	}
 	termbox.SetInputMode(inputMode)
 
-	if err := g.Flush(); err != nil {
+	if err := g.flush(); err != nil {
 		return err
 	}
 	for {
-		ev := <-g.events
-		if err := g.handleEvent(&ev); err != nil {
-			return err
+		select {
+		case ev := <-g.tbEvents:
+			if err := g.handleEvent(&ev); err != nil {
+				return err
+			}
+		case ev := <-g.userEvents:
+			if err := ev.h(g); err != nil {
+				return err
+			}
 		}
 		if err := g.consumeevents(); err != nil {
 			return err
 		}
-		if err := g.Flush(); err != nil {
+		if err := g.flush(); err != nil {
 			return err
 		}
 	}
@@ -246,8 +264,12 @@ func (g *Gui) MainLoop() error {
 func (g *Gui) consumeevents() error {
 	for {
 		select {
-		case ev := <-g.events:
+		case ev := <-g.tbEvents:
 			if err := g.handleEvent(&ev); err != nil {
+				return err
+			}
+		case ev := <-g.userEvents:
+			if err := ev.h(g); err != nil {
 				return err
 			}
 		default:
@@ -269,16 +291,8 @@ func (g *Gui) handleEvent(ev *termbox.Event) error {
 	}
 }
 
-// Flush updates the gui, re-drawing frames and buffers.
-//
-// Flush is safe for concurrent use by multiple goroutines. However it is
-// important to note that it will make the layout function to be called, which
-// could lead to a dead lock if the same mutex is used in both the function
-// calling Flush and the layout function.
-func (g *Gui) Flush() error {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-
+// flush updates the gui, re-drawing frames and buffers.
+func (g *Gui) flush() error {
 	if g.layout == nil {
 		return errors.New("Null layout")
 	}
@@ -356,7 +370,7 @@ func (g *Gui) drawFrame(v *View) error {
 
 // draw manages the cursor and calls the draw function of a view.
 func (g *Gui) draw(v *View) error {
-	if g.ShowCursor {
+	if g.Cursor {
 		if v := g.currentView; v != nil {
 			maxX, maxY := v.Size()
 			cx, cy := v.cx, v.cy
@@ -479,9 +493,15 @@ func (g *Gui) onKey(ev *termbox.Event) error {
 		}
 		curView = g.currentView
 	case termbox.EventMouse:
-		if v, err := g.ViewByPosition(ev.MouseX, ev.MouseY); err == nil {
-			curView = v
+		mx, my := ev.MouseX, ev.MouseY
+		v, err := g.ViewByPosition(mx, my)
+		if err != nil {
+			break
 		}
+		if err := v.SetCursor(mx-v.x0-1, my-v.y0-1); err != nil {
+			return err
+		}
+		curView = v
 	}
 
 	for _, kb := range g.keybindings {
